@@ -1,0 +1,25 @@
+name: message_parser
+description: Privacy-first financial transaction parser for iOS and Android.
+publish_to: 'none'
+version: 0.0.1+1
+
+environment:
+  sdk: ^3.5.0
+
+dependencies:
+  flutter:
+    sdk: flutter
+  cupertino_icons: ^1.0.8
+  # Runtime permission prompts (READ_SMS on Android)
+  permission_handler: ^11.3.1
+  # SMS inbox read for Android. Actively maintained fork of `telephony`.
+  # iOS is a no-op; we guard all calls behind Platform.isAndroid.
+  another_telephony: ^0.4.0
+
+dev_dependencies:
+  flutter_test:
+    sdk: flutter
+  flutter_lints: ^4.0.0
+
+flutter:
+  uses-material-design: true

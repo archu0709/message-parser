@@ -933,18 +933,19 @@ Implement the four-tab dashboard and transaction edit flow.
 * Transaction detail screen: view mode + inline edit mode with all fields
 * Soft delete with 30-day recovery
 
-## Module 6: CI/CD Pipeline
-Write the GitHub Actions workflows for both platforms.
-* **iOS (`ios-build.yml`):**
+## Module 6: CI/CD Pipeline ✅ (pulled forward — implemented alongside Module 0)
+GitHub Actions workflows for both platforms, deployed early so every push produces installable artifacts.
+
+* **iOS (`.github/workflows/ios-build.yml`):**
   * Target: `macos-latest`
-  * Actions: Set up Flutter, install dependencies
-  * Build Command: `flutter build ios --release --no-codesign`
-  * Packaging: Script the creation of a `Payload` directory, move the `Runner.app` inside, and zip it into an `app-name.ipa` artifact for Sideloadly
-* **Android (`android-build.yml`):**
+  * Steps: Checkout → Flutter 3.41.6 → pub get → analyze → `flutter build ios --release --no-codesign` → package `Payload/Runner.app` into `.ipa` → upload artifact
+  * On version tags (`v*`): attaches `.ipa` to GitHub Release
+* **Android (`.github/workflows/android-build.yml`):**
   * Target: `ubuntu-latest`
-  * Actions: Set up Flutter, install dependencies, configure Java
-  * Build Command: `flutter build apk --release`
-  * Packaging: Upload the `app-release.apk` artifact for direct installation
+  * Steps: Checkout → Java 17 → Flutter 3.41.6 → pub get → analyze → `flutter build apk --release` → upload artifact
+  * On version tags (`v*`): attaches `.apk` to GitHub Release
+* **Triggers:** push to `main`, pull requests to `main`, version tags
+* **Artifacts:** downloadable from GitHub Actions tab (retained 30 days), permanently attached to Releases
 
 # Execution Protocol
 
@@ -960,13 +961,13 @@ Write the GitHub Actions workflows for both platforms.
 | # | Module | Gate to proceed |
 |---|--------|----------------|
 | 0 | **POC — Read & Display Messages** | App runs on a real Android device showing real SMS grouped by sender; iOS paste area counts and lists blocks correctly |
+| 6 | **CI/CD Pipeline** ✅ | GitHub Actions produces a downloadable `.ipa` and `.apk` artifact on every push to `main` — **pulled forward, implemented alongside Module 0** |
 | 0.5 | **Classification POC — On-Device LLM Labels Each Message** | Standard bank messages classified correctly at high confidence; benchmark panel shows RAM, load time, and inference speed on a real device; app does not OOM crash |
 | 1 | **Input Layer** | Background SMS auto-captured on Android; Share Extension and clipboard prompt working on iOS |
 | 2 | **Data Layer & Backup** | Transactions, Accounts, Cards, Categories, InvestmentAccounts, People tables created; CRUD tested; Supabase backup round-trips successfully |
 | 3 | **Triage Engine (Regex)** | 90%+ of standard HDFC/SBI/ICICI/Axis message formats parsed correctly in unit tests |
 | 4 | **LLM Gateway** | Module 0.5 on-device classifier promoted to abstract `LLMProvider`; model selection confirmed using Module 0.5 benchmark data; all three providers (OpenAI, Anthropic, Local) return a valid structured Transaction |
 | 5 | **Dashboard & Transaction UI** | All 6 tabs render with real data; edit/save/delete flow works end-to-end |
-| 6 | **CI/CD Pipeline** | GitHub Actions produces a downloadable `.ipa` and `.apk` artifact on every push to `main` |
 
 ## Starting point
 Begin with **Module 0**. Provide the complete code for the POC screen, the platform permission setup, and the two packages (`permission_handler`, `telephony`) configured in `pubspec.yaml`. Nothing else.

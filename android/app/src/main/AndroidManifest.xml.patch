@@ -1,0 +1,13 @@
+After running `flutter create`, add the following line INSIDE the `<manifest>`
+element (above `<application>`) in android/app/src/main/AndroidManifest.xml:
+
+    <uses-permission android:name="android.permission.READ_SMS"/>
+
+Final manifest top should look like:
+
+    <manifest xmlns:android="http://schemas.android.com/apk/res/android">
+        <uses-permission android:name="android.permission.READ_SMS"/>
+        <application ...>
+            ...
+        </application>
+    </manifest>
