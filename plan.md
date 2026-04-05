@@ -724,6 +724,177 @@ lib/
 
 ---
 
+## Module 0.5: Classification POC — On-Device LLM Labels Each Message
+
+**Goal:** Run a real open-source LLM directly on the physical device to prove classification works AND to measure device limits — RAM headroom, model load time, inference speed, and thermal behaviour — before locking in the architecture. These numbers directly inform model selection for Module 4.
+
+### Why on-device from the start
+The device constraints (available RAM, Neural Engine / GPU support, storage for the model file) are unknowns that will shape every downstream decision: which model family to ship, whether to keep it resident in memory or load/unload per session, and whether lower-end Android devices are viable targets. Measuring this early prevents an expensive architectural pivot later.
+
+### Runtime — MediaPipe LLM Inference API
+MediaPipe is the most practical choice for a cross-platform Flutter POC:
+- Official Google support for iOS and Android via a single Flutter plugin
+- Ships with hardware-accelerated backends (GPU delegate on Android, Metal/Core ML on iOS)
+- Gemma model family is purpose-built for it and available in multiple sizes
+- No NDK compilation or FFI bridging required
+
+**Primary model to test:** `gemma-2b-it-gpu-int4.bin` (~1.3 GB)
+**Fallback if RAM is tight:** `gemma2-2b-it-q8_0.gguf` via llama.cpp, or `phi-3-mini-4k-instruct-q4` (~2.2 GB)
+
+### Model candidates & expected device footprint
+
+| Model | File size | Peak RAM (approx) | Notes |
+|-------|-----------|-------------------|-------|
+| Gemma 2B INT4 | 1.3 GB | ~1.5 GB | Recommended first test |
+| Gemma 2B INT8 | 2.6 GB | ~2.8 GB | Higher accuracy baseline |
+| Phi-3 Mini (3.8B Q4) | 2.2 GB | ~2.5 GB | Strong at structured JSON |
+| Llama 3.2 1B Q4 | 0.7 GB | ~1.0 GB | Fallback for low-RAM devices |
+
+Test at least two models on the same device and record results in the benchmarking screen (see below).
+
+### What to build
+Extend the Module 0 POC screen with two additions:
+
+1. **Model loader** — on first launch, prompt the user to download the model file (~1.3 GB). Show download progress, then initialise the MediaPipe inference session. Keep the model resident in memory for the session.
+
+2. **"Classify All" flow** — after model is loaded, classify each message one at a time with a structured prompt. Display results inline. Record timing and memory metrics per message.
+
+### Prompt design
+```
+<start_of_turn>user
+You are a financial SMS classifier. Extract data from the message below.
+Respond ONLY with a single JSON object. No explanation, no markdown.
+
+{
+  "is_financial": boolean,
+  "type": "debit" | "credit" | "credit_card_charge" | "credit_card_payment" |
+          "bank_transfer" | "otp" | "promotional" | "unknown",
+  "amount": number | null,
+  "currency": "INR" | null,
+  "merchant": string | null,
+  "account_last4": string | null,
+  "category": "food" | "fuel" | "groceries" | "phone_internet" | "insurance" |
+              "subscriptions" | "beauty" | "hotel" | "movies" | "loan_emi" |
+              "loan_prepayment" | "salary" | "dividends" | "other_income" | "uncategorized",
+  "confidence": "high" | "medium" | "low"
+}
+
+Message: "<raw_message_text>"
+<end_of_turn>
+<start_of_turn>model
+```
+
+### UI
+
+#### Model loader screen (first launch)
+```
+┌──────────────────────────────────────────┐
+│  On-Device AI                            │
+│                                          │
+│  Gemma 2B (INT4)              1.3 GB     │
+│  ████████████████░░░░  78%               │
+│  Downloading… 1.01 GB of 1.3 GB         │
+│                                          │
+│  This runs entirely on your device.      │
+│  No data leaves your phone.              │
+└──────────────────────────────────────────┘
+```
+
+#### Classified message card
+```
+┌──────────────────────────────────────────┐
+│ VM-HDFCBK  ·  Apr 3, 2:14 PM            │
+│ Rs.480.00 debited from A/c ••4521 to    │
+│ VPA swiggy@icici on 03-04-26            │
+├──────────────────────────────────────────┤
+│ [DEBIT]  Food  ·  ₹ 480  ·  ••4521      │
+│ Merchant: Swiggy         [high ✓]       │
+└──────────────────────────────────────────┘
+
+┌──────────────────────────────────────────┐
+│ VM-SBIINB  ·  Apr 1, 9:00 AM            │
+│ Your A/c ••8834 credited with Rs 85000  │
+│ by NEFT from EMPLOYER LTD               │
+├──────────────────────────────────────────┤
+│ [CREDIT]  Salary  ·  ₹ 85,000  ·  ••8834│
+│ Merchant: EMPLOYER LTD   [high ✓]       │
+└──────────────────────────────────────────┘
+
+┌──────────────────────────────────────────┐
+│ AD-OFFERS  ·  Mar 30                     │
+│ Get 50% off on your next Swiggy order...│
+├──────────────────────────────────────────┤
+│ [PROMOTIONAL]  —  Not financial          │
+└──────────────────────────────────────────┘
+```
+
+- Messages classified as `is_financial: false` shown collapsed with a grey badge
+- Summary bar: "X financial · Y promotional/OTP · Z unclassified"
+- Confidence badge: `high ✓` (green) · `medium ~` (amber) · `low ?` (red)
+- Progress counter: "Classifying 34 / 312…"
+
+#### Benchmarking panel (collapsible, bottom of screen)
+Records device limits — the primary output of this module alongside classification accuracy.
+```
+┌──────────────────────────────────────────┐
+│  Device Benchmarks          [▲ collapse] │
+│                                          │
+│  Model          Gemma 2B INT4            │
+│  Load time      4.2 s                    │
+│  RAM at idle    1.48 GB                  │
+│  RAM peak       1.71 GB                  │
+│  Avg inference  1.3 s / message          │
+│  Min / Max      0.9 s / 3.1 s            │
+│  Device RAM     6 GB total               │
+│  Free after load  3.8 GB                 │
+│  Thermal state  nominal                  │
+└──────────────────────────────────────────┘
+```
+
+Metrics are collected using `ProcessInfo.maxRss` (iOS) / `/proc/self/status` (Android) via a platform channel. Thermal state via `ProcessInfo.thermalState` (iOS) / `PowerManager` (Android).
+
+### Files to create / modify
+```
+lib/
+└── features/
+    └── poc/
+        ├── poc_screen.dart                 # Add "Classify All" + benchmark panel
+        ├── classified_message_card.dart    # Card with LLM result + confidence badge
+        ├── model_loader_screen.dart        # Download progress + init screen
+        ├── on_device_classifier.dart       # MediaPipe session wrapper, prompt builder, JSON parse
+        └── benchmark_panel.dart           # Collapsible metrics display
+
+android/app/src/main/kotlin/.../
+└── MemoryChannel.kt                       # /proc/self/status + thermal state bridge
+
+ios/Runner/
+└── MemoryChannel.swift                    # ProcessInfo.maxRss + thermalState bridge
+```
+
+### Key packages
+```yaml
+mediapipe_genai: ^0.1.0   # MediaPipe LLM Inference Flutter plugin
+path_provider: ^2.0.0     # Locate model file storage path
+dio: ^5.0.0               # Resumable model file download with progress
+```
+
+### Acceptance criteria — classification
+- [ ] Standard HDFC / SBI / ICICI / Axis debit and credit messages classified correctly at `high` confidence
+- [ ] Promotional and OTP messages correctly identified as non-financial
+- [ ] Salary credit → `salary` category; loan EMI → `loan_emi`
+- [ ] JSON parse succeeds on every response (no hallucinated fields)
+
+### Acceptance criteria — device limits (record actuals, no pass/fail)
+- [ ] Model load time measured and logged
+- [ ] RAM usage at idle (model loaded, no inference) measured
+- [ ] RAM peak during inference measured
+- [ ] Average, min, and max inference time per message recorded over a 50-message batch
+- [ ] App does not crash (OOM) on the primary test device
+- [ ] Thermal state recorded after classifying 50 messages back-to-back
+- [ ] All benchmark numbers documented — these feed directly into Module 4 model selection
+
+---
+
 ## Module 1: The Input Layer (Platform-Specific Workflows)
 Write the Flutter code and native configurations to capture text based on the platform.
 * **iOS (Manual/Semi-Automated):**
@@ -789,10 +960,11 @@ Write the GitHub Actions workflows for both platforms.
 | # | Module | Gate to proceed |
 |---|--------|----------------|
 | 0 | **POC — Read & Display Messages** | App runs on a real Android device showing real SMS grouped by sender; iOS paste area counts and lists blocks correctly |
+| 0.5 | **Classification POC — On-Device LLM Labels Each Message** | Standard bank messages classified correctly at high confidence; benchmark panel shows RAM, load time, and inference speed on a real device; app does not OOM crash |
 | 1 | **Input Layer** | Background SMS auto-captured on Android; Share Extension and clipboard prompt working on iOS |
 | 2 | **Data Layer & Backup** | Transactions, Accounts, Cards, Categories, InvestmentAccounts, People tables created; CRUD tested; Supabase backup round-trips successfully |
 | 3 | **Triage Engine (Regex)** | 90%+ of standard HDFC/SBI/ICICI/Axis message formats parsed correctly in unit tests |
-| 4 | **LLM Gateway** | All three providers (OpenAI, Anthropic, Local) parse a test message and return a valid structured Transaction |
+| 4 | **LLM Gateway** | Module 0.5 on-device classifier promoted to abstract `LLMProvider`; model selection confirmed using Module 0.5 benchmark data; all three providers (OpenAI, Anthropic, Local) return a valid structured Transaction |
 | 5 | **Dashboard & Transaction UI** | All 6 tabs render with real data; edit/save/delete flow works end-to-end |
 | 6 | **CI/CD Pipeline** | GitHub Actions produces a downloadable `.ipa` and `.apk` artifact on every push to `main` |
 
